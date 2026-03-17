@@ -1,0 +1,16 @@
+# Python virtual environment (The heavy stuff)
+venv/
+.venv/
+env/
+
+# Computer-generated junk
+__pycache__/
+*.pyc
+.DS_Store
+
+# Secret keys (Don't share these on GitHub!)
+.env
+
+# Large data files (Optional)
+*.pdf
+*.csv
