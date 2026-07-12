@@ -14,3 +14,7 @@ __pycache__/
 # Large data files (Optional)
 *.pdf
 *.csv
+.env
+venv/
+__pycache__/
+*.pyc
