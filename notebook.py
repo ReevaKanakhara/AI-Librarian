@@ -1,59 +1,42 @@
 """
-notebook.py — after each answer, a small classification call decides whether
-the exchange is worth saving as a "finding," "open_question," or
-"disagreement." Not every exchange gets logged — only substantive ones.
+notebook.py — "Saved Notes" export. Notes are now user-curated: the person
+clicks "Save to notes" on an answer they want to keep, rather than an LLM
+auto-classifying every exchange as a finding/disagreement/open-question.
+The auto-classifier was producing self-contradictory entries over time
+(the same author question logged different, conflicting "findings" on
+different calls) — a manual save-list has no such contradiction because
+it's just what the user chose to keep, verbatim.
 """
 
-import json
 import db
-
-CLASSIFY_PROMPT = """Given this Q&A exchange from a research assistant, decide if it contains
-something worth saving to a running research notebook.
-
-Categories:
-- "finding": a concrete result or fact established by the source(s)
-- "open_question": something unresolved, or worth investigating further
-- "disagreement": two sources conflicting or one contradicting another
-- "skip": small talk, a repeat of something already established, or not substantive
-
-Respond ONLY with valid JSON, nothing else:
-{{"category": "finding|open_question|disagreement|skip", "summary": "one clear sentence, or empty string if skip"}}
-
-Question: {question}
-Answer: {answer}
-"""
-
-
-def maybe_log(groq_client, question: str, answer: str, source_paper_ids: list):
-    resp = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": CLASSIFY_PROMPT.format(question=question, answer=answer)}],
-        temperature=0,
-        max_tokens=150,
-    )
-    raw = resp.choices[0].message.content.strip()
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        return None
-
-    if parsed.get("category") in ("finding", "open_question", "disagreement") and parsed.get("summary"):
-        db.add_notebook_entry(parsed["category"], parsed["summary"], source_paper_ids)
-        return parsed
-    return None
 
 
 def export_markdown() -> str:
     entries = db.list_notebook_entries()
     papers = {p["id"]: p for p in db.list_papers()}
 
-    lines = ["# Research Notebook", ""]
-    sections = [
-        ("finding", "Findings"),
-        ("disagreement", "Disagreements"),
-        ("open_question", "Open Questions"),
+    lines = ["# Saved Notes", ""]
+
+    saved = [e for e in entries if e["type"] == "saved"]
+    if saved:
+        for e in saved:
+            sources = ", ".join(papers.get(pid, {}).get("title", pid) for pid in e["source_paper_ids"])
+            lines.append(f"## {e['text'].splitlines()[0].replace('Q: ', '')}")
+            lines.append("")
+            body = "\n".join(e["text"].splitlines()[1:]).replace("A: ", "", 1)
+            lines.append(body)
+            if sources:
+                lines.append(f"\n_Source: {sources}_")
+            lines.append("")
+
+    # Backward-compat: older entries logged before this change used these
+    # categories via an auto-classifier that's no longer called.
+    legacy_sections = [
+        ("finding", "Findings (legacy)"),
+        ("disagreement", "Disagreements (legacy)"),
+        ("open_question", "Open Questions (legacy)"),
     ]
-    for key, label in sections:
+    for key, label in legacy_sections:
         section_entries = [e for e in entries if e["type"] == key]
         if not section_entries:
             continue

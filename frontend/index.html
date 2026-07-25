@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Librarian</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root{
+    --bg:#FBF9F5;
+    --paper:#F4F0E8;
+    --rail:#F1ECE1;
+    --rail-hover:#E8E0D0;
+    --ink:#241F16;
+    --ink-soft:#71675A;
+    --ink-faint:#A69C8C;
+    --accent:#8A3B2E;
+    --accent-soft:#F0DAD3;
+    --border:#E4DCC9;
+    --font-display:'Source Serif 4','IBM Plex Sans',serif;
+    --font-body:'IBM Plex Sans',sans-serif;
+    --font-mono:'IBM Plex Mono',monospace;
+    --ease:cubic-bezier(0.4, 0, 0.2, 1);
+    --spring:cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); font-family:var(--font-body); color:var(--ink); overflow:hidden; }
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; } }
+
+  .library-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+  .library-bg::before{
+    content:''; position:absolute; inset:0;
+    background:
+      radial-gradient(ellipse 900px 500px at 12% -5%, rgba(138,59,46,0.06), transparent 60%),
+      radial-gradient(ellipse 700px 600px at 100% 20%, rgba(59,90,138,0.05), transparent 60%),
+      var(--bg);
+  }
+  .library-bg::after{
+    content:''; position:absolute; inset:0; opacity:0.5; mix-blend-mode:multiply;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.012) 0px, transparent 1px, transparent 2px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.012) 0px, transparent 1px, transparent 2px);
+  }
+  #shelf-band{ position:absolute; inset:0; opacity:0.07; }
+
+  .app{ height:100vh; display:flex; position:relative; z-index:1; }
+
+  .rail{
+    width:76px; flex-shrink:0; background:var(--rail);
+    display:flex; flex-direction:column; align-items:center;
+    padding:14px 0; transition:width 0.28s var(--ease);
+    overflow:hidden; border-right:1px solid var(--border);
+  }
+  .rail.expanded{ width:280px; align-items:stretch; padding:14px 12px; }
+
+  .rail-top{ display:flex; align-items:center; justify-content:center; gap:10px; padding:2px 0 10px 0; flex-shrink:0; }
+  .rail.expanded .rail-top{ justify-content:flex-start; padding:2px 4px 14px 8px; }
+  .rail:not(.expanded) .rail-top{ gap:0; }
+  .rail-toggle{
+    width:40px; height:40px; border-radius:50%; border:none; background:none;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    color:var(--ink-soft); flex-shrink:0; transition:background 0.15s ease;
+  }
+  .rail-toggle:hover{ background:var(--rail-hover); }
+  .rail-brand{
+    display:flex; align-items:center; gap:10px;
+    font-family:var(--font-display); font-weight:600; font-size:1.02rem;
+    white-space:nowrap; opacity:0; width:0; overflow:hidden; transition:opacity 0.2s ease;
+  }
+  .rail.expanded .rail-brand{ opacity:1; width:auto; }
+
+  /* Real SVG icon instead of a faked-3D CSS construct — crisp at any size,
+     no perspective/rotateY hacks. */
+  .book-icon{ position:relative; flex-shrink:0; display:inline-flex; }
+  .book-icon svg{ width:100%; height:100%; display:block; overflow:visible; }
+  .book-icon.sm{ width:20px; height:20px; }
+  .book-icon.lg{ width:48px; height:48px; }
+  @keyframes bookThink{ 0%,100%{ transform:scale(1) rotate(0deg); opacity:0.8; } 50%{ transform:scale(1.08) rotate(-3deg); opacity:1; } }
+  @keyframes bookIdle{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-2px); } }
+  .book-icon.thinking svg{ animation:bookThink 1s ease-in-out infinite; transform-origin:center; }
+  .book-icon.idle svg{ animation:bookIdle 3.6s ease-in-out infinite; }
+
+  .rail-new-chat{
+    display:flex; align-items:center; gap:10px; padding:10px;
+    border-radius:20px; cursor:pointer; border:1px solid var(--border); background:var(--bg);
+    color:var(--ink); font-size:0.84rem; font-weight:500; white-space:nowrap; overflow:hidden;
+    margin-bottom:10px; flex-shrink:0; transition:background 0.15s ease, transform 0.15s var(--spring);
+  }
+  .rail:not(.expanded) .rail-new-chat{ justify-content:center; border-radius:50%; width:44px; height:44px; padding:0; align-self:center; gap:0; }
+  .rail-new-chat:hover{ background:var(--accent-soft); border-color:var(--accent); transform:translateY(-1px); }
+  .rail-new-chat span.label{ opacity:0; width:0; overflow:hidden; transition:opacity 0.2s ease; }
+  .rail.expanded .rail-new-chat span.label{ opacity:1; width:auto; }
+
+  .rail-scroll{ flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; min-height:0; }
+  .rail:not(.expanded) .rail-scroll{ align-items:center; }
+  .rail-scroll::-webkit-scrollbar{ width:6px; }
+  .rail-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:6px; }
+
+  .rail-section-label{
+    font-family:var(--font-mono); font-size:0.62rem; letter-spacing:0.09em; text-transform:uppercase;
+    color:var(--ink-faint); padding:12px 10px 6px 10px; opacity:0; height:0; overflow:hidden;
+    transition:opacity 0.2s ease; flex-shrink:0;
+  }
+  .rail.expanded .rail-section-label{ opacity:1; height:auto; }
+
+  .rail-list{ display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
+
+  .rail-item{
+    display:flex; align-items:center; gap:11px; padding:9px 8px;
+    border-radius:14px; cursor:pointer; white-space:nowrap; position:relative;
+    transition:background 0.15s ease, opacity 0.2s ease;
+  }
+  .rail:not(.expanded) .rail-item{ justify-content:center; padding:9px; border-radius:50%; width:44px; height:44px; align-self:center; gap:0; }
+  .rail-item:hover{ background:var(--rail-hover); }
+  .rail-item.active{ background:var(--accent-soft); }
+  .rail-item.inactive{ opacity:0.4; }
+
+  .rail:not(.expanded) #sessions-list{ display:none; }
+  .paper-spine{ width:7px; height:22px; border-radius:2px; flex-shrink:0; }
+  .rail:not(.expanded) .paper-spine{ width:9px; height:9px; border-radius:50%; }
+
+  .rail-item-label{
+    font-size:0.83rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    opacity:0; width:0; flex:1; min-width:0; transition:opacity 0.2s ease;
+  }
+  .rail.expanded .rail-item-label{ opacity:1; width:auto; }
+  .rail-item-label-input{
+    font-size:0.83rem; flex:1; min-width:0; font-family:var(--font-body); color:var(--ink);
+    background:#fff; border:1px solid var(--accent); border-radius:6px; padding:2px 6px;
+    outline:none;
+  }
+
+  .rail-item-delete{
+    width:24px; height:24px; border-radius:50%; border:none; background:none;
+    color:var(--ink-faint); display:none; align-items:center; justify-content:center;
+    cursor:pointer; flex-shrink:0; font-size:0.75rem; transition:background 0.15s ease, color 0.15s ease;
+  }
+  .rail-item-edit{
+    width:24px; height:24px; border-radius:50%; border:none; background:none;
+    color:var(--ink-faint); display:none; align-items:center; justify-content:center;
+    cursor:pointer; flex-shrink:0; font-size:0.8rem; transition:background 0.15s ease, color 0.15s ease;
+  }
+  .rail.expanded .rail-item:hover .rail-item-delete, .rail.expanded .rail-item:hover .rail-item-edit{ display:flex; }
+  .rail-item-delete:hover{ background:rgba(138,59,46,0.14); color:var(--accent); }
+  .rail-item-edit:hover{ background:var(--rail-hover); color:var(--ink); }
+
+  .rail-add{
+    display:flex; align-items:center; gap:10px; padding:10px;
+    border-radius:20px; cursor:pointer; color:var(--ink-soft); font-size:0.82rem;
+    border:1px dashed var(--border); margin-top:6px; white-space:nowrap; overflow:hidden;
+    flex-shrink:0; transition:background 0.15s ease, color 0.15s ease;
+  }
+  .rail-add .plus-icon{ flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .rail-new-chat .plus-icon{ display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .rail-add .add-label{ overflow:hidden; text-overflow:ellipsis; }
+  .rail:not(.expanded) .rail-add{
+    justify-content:center; border-radius:50%; width:44px; height:44px; padding:0; align-self:center; gap:0;
+  }
+  .rail:not(.expanded) .rail-add .add-label{ display:none; }
+  .rail-add:hover{ background:var(--rail-hover); color:var(--accent); border-color:var(--accent); }
+
+  .upload-panel{
+    display:grid; grid-template-rows:0fr; opacity:0; flex-shrink:0;
+    transition:grid-template-rows 0.3s var(--ease), opacity 0.25s ease;
+  }
+  .upload-panel.open{ grid-template-rows:1fr; opacity:1; }
+  .upload-panel > div{ overflow:hidden; }
+  .upload-inner{ padding:10px 4px; display:flex; flex-direction:column; gap:6px; }
+  .upload-inner input[type=file], .upload-inner input[type=text]{
+    font-family:var(--font-body); font-size:0.78rem; padding:8px 10px;
+    border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--ink);
+  }
+  .upload-inner input.shimmer{
+    background:linear-gradient(90deg, rgba(138,59,46,0.06) 25%, rgba(138,59,46,0.15) 37%, rgba(138,59,46,0.06) 63%);
+    background-size:400% 100%; animation:shimmer 1.4s ease infinite;
+  }
+  @keyframes shimmer{ 0%{background-position:100% 50%;} 100%{background-position:0 50%;} }
+  .upload-inner button{
+    font-family:var(--font-body); font-size:0.8rem; font-weight:500; padding:8px;
+    border:none; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer;
+    transition:transform 0.15s var(--spring), opacity 0.2s ease;
+  }
+  .upload-inner button:hover{ transform:translateY(-1px); }
+  .upload-inner button:disabled{ opacity:0.5; }
+  .meta-hint{ font-family:var(--font-mono); font-size:0.6rem; color:var(--accent); }
+
+  .main{ flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 26px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .topbar-title{ font-family:var(--font-display); font-weight:600; font-size:1rem; color:var(--ink); }
+  .icon-btn{
+    width:40px; height:40px; border-radius:50%; border:none; background:none;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    color:var(--ink-soft); position:relative; transition:background 0.15s ease;
+  }
+  .icon-btn:hover{ background:var(--rail-hover); }
+  .icon-btn svg{ width:19px; height:19px; }
+  .rail-toggle svg{ width:19px; height:19px; }
+  .rail-item-delete svg, .rail-item-edit svg{ width:14px; height:14px; }
+  .plus-icon svg{ width:16px; height:16px; display:block; }
+  .msg-actions button svg{ width:14px; height:14px; flex-shrink:0; }
+  #send-btn svg{ width:18px; height:18px; }
+  .icon-btn .badge{
+    position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
+    background:var(--accent); display:none;
+  }
+  .icon-btn.has-entries .badge{ display:block; }
+
+  .thread{
+    flex:1; overflow-y:auto; display:flex; justify-content:center;
+    padding:24px 20px 8px 20px;
+  }
+  .thread-inner{ width:100%; max-width:760px; }
+  .thread::-webkit-scrollbar{ width:8px; }
+  .thread::-webkit-scrollbar-thumb{ background:var(--border); border-radius:8px; }
+
+  .empty-state{
+    height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:12px; text-align:center; color:var(--ink-soft);
+  }
+  .empty-state .big{ font-family:var(--font-display); font-weight:600; font-size:1.5rem; color:var(--ink); }
+  .empty-state .small{ font-size:0.88rem; }
+
+  .msg{ max-width:88%; margin-bottom:24px; animation:msgIn 0.35s var(--spring) both; }
+  @keyframes msgIn{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+  .msg.user{ margin-left:auto; }
+  .msg.assistant{ display:flex; gap:12px; max-width:100%; }
+  .msg-col{ flex:1; min-width:0; }
+  .msg .bubble{ padding:12px 18px; border-radius:20px; font-size:0.96rem; line-height:1.7; }
+  .msg.user .bubble{ background:var(--rail); border-bottom-right-radius:6px; }
+  .msg.assistant .bubble{ padding:2px 0 0 0; font-family:var(--font-body); }
+  .msg .bubble p{ margin:0 0 0.7em 0; }
+  .msg .bubble p:last-child{ margin-bottom:0; }
+  .msg .bubble ul, .msg .bubble ol{ margin:0.4em 0; padding-left:1.3em; }
+  .msg .bubble li{ margin-bottom:0.3em; }
+  .msg .bubble strong{ font-weight:600; }
+  .msg .bubble h1, .msg .bubble h2, .msg .bubble h3{ font-family:var(--font-display); margin:0.8em 0 0.3em 0; }
+  .msg .bubble code{ font-family:var(--font-mono); font-size:0.85em; background:var(--rail); padding:1px 5px; border-radius:4px; }
+  .msg .bubble table{ border-collapse:collapse; width:100%; margin:0.8em 0; font-size:0.86rem; }
+  .msg .bubble th, .msg .bubble td{ border:1px solid var(--border); padding:6px 12px; text-align:left; vertical-align:top; }
+  .msg .bubble th{ background:var(--rail); font-weight:600; font-family:var(--font-body); }
+  .msg .bubble tr:nth-child(even) td{ background:rgba(0,0,0,0.015); }
+  .msg .bubble table{ border-collapse:collapse; width:100%; margin:0.8em 0; font-size:0.88rem; }
+  .msg .bubble th, .msg .bubble td{ border:1px solid var(--border); padding:6px 10px; text-align:left; }
+  .msg .bubble th{ background:var(--rail); font-weight:600; }
+  .msg .bubble tr:nth-child(even) td{ background:rgba(228,220,201,0.25); }
+
+  .msg-actions{
+    display:flex; gap:4px; margin-top:10px; opacity:0; transition:opacity 0.15s ease;
+  }
+  .msg-col:hover .msg-actions{ opacity:1; }
+  .msg-actions button{
+    display:flex; align-items:center; gap:5px;
+    font-family:var(--font-body); font-size:0.72rem; color:var(--ink-soft);
+    background:none; border:none; border-radius:14px; padding:5px 10px; cursor:pointer;
+    transition:background 0.15s ease, color 0.15s ease;
+  }
+  .msg-actions button:hover{ background:var(--rail); color:var(--ink); }
+  .msg-actions button[data-up], .msg-actions button[data-down]{ opacity:0.45; transition:opacity 0.15s ease; }
+
+  .cite-row{ display:flex; flex-direction:column; gap:5px; margin-top:12px; }
+  .cite-chip{
+    display:inline-flex; align-items:center; gap:8px; width:fit-content; max-width:100%;
+    font-family:var(--font-body); font-size:0.76rem; color:var(--ink-soft);
+    padding:6px 12px 6px 8px; border-radius:14px; background:var(--rail);
+    animation:chipIn 0.3s var(--spring) both; transition:transform 0.15s var(--spring), background 0.15s ease, color 0.15s ease;
+  }
+  .cite-chip:hover{ transform:translateX(2px); background:var(--rail-hover); color:var(--ink); }
+  @keyframes chipIn{ from{opacity:0; transform:translateX(-6px);} to{opacity:1; transform:translateX(0);} }
+  .cite-num{
+    font-family:var(--font-mono); font-weight:600; font-size:0.72rem; color:#fff;
+    background:var(--accent); width:18px; height:18px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .cite-title{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cite-page{ font-family:var(--font-mono); color:var(--ink-faint); flex-shrink:0; }
+
+  .status-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .status-row span{ font-size:0.85rem; color:var(--ink-soft); }
+
+  .variant-nav{
+    display:flex; align-items:center; gap:6px; margin-top:8px;
+    font-family:var(--font-mono); font-size:0.72rem; color:var(--ink-faint);
+  }
+  .variant-nav button{
+    width:20px; height:20px; border-radius:50%; border:none; background:none;
+    color:var(--ink-soft); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:0.85rem; transition:background 0.15s ease;
+  }
+  .variant-nav button:hover:not(:disabled){ background:var(--rail); color:var(--ink); }
+  .variant-nav button:disabled{ opacity:0.3; cursor:default; }
+
+  .composer-wrap{ display:flex; justify-content:center; padding:10px 20px 22px 20px; flex-shrink:0; }
+  .composer{
+    width:100%; max-width:760px; display:flex; align-items:flex-end; gap:8px;
+    background:#fff; border:1px solid var(--border); border-radius:26px; padding:8px 8px 8px 20px;
+    box-shadow:0 1px 2px rgba(36,31,22,0.04), 0 2px 10px rgba(36,31,22,0.05);
+    transition:box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .composer:focus-within{ box-shadow:0 2px 4px rgba(138,59,46,0.1), 0 0 0 1px rgba(138,59,46,0.18); border-color:transparent; }
+  .composer textarea{
+    flex:1; border:none; background:none; outline:none; resize:none;
+    font-family:var(--font-body); font-size:0.96rem; color:var(--ink); padding:9px 0;
+    line-height:1.5; max-height:200px; overflow-y:auto; font-weight:400;
+  }
+  .composer textarea::placeholder{ color:var(--ink-faint); }
+  .composer button{
+    width:38px; height:38px; border-radius:50%; border:none; background:var(--accent);
+    color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:1rem; flex-shrink:0; transition:transform 0.15s var(--spring), opacity 0.2s ease, background 0.15s ease;
+  }
+  .composer button:hover:not(:disabled){ transform:scale(1.06); }
+  .composer button:active{ transform:scale(0.92); }
+  .composer button:disabled{ opacity:0.3; background:var(--ink-faint); }
+  .composer-hint{ text-align:center; font-size:0.68rem; color:var(--ink-faint); margin-top:8px; font-family:var(--font-mono); }
+
+  .drawer-overlay{
+    position:fixed; inset:0; background:rgba(36,31,22,0.18); z-index:9;
+    opacity:0; pointer-events:none; transition:opacity 0.3s var(--ease);
+  }
+  .drawer-overlay.open{ opacity:1; pointer-events:auto; }
+  .drawer{
+    position:fixed; top:0; right:0; bottom:0; width:380px; max-width:92vw;
+    background:#fff; z-index:10; box-shadow:-4px 0 24px rgba(36,31,22,0.1);
+    display:flex; flex-direction:column;
+    transform:translateX(100%); transition:transform 0.34s var(--ease);
+  }
+  .drawer.open{ transform:translateX(0); }
+  .drawer-header{ padding:18px 20px; border-bottom:1px solid var(--border); }
+  .drawer-header-row{ display:flex; align-items:center; justify-content:space-between; }
+  .drawer-header h2{ font-family:var(--font-display); font-weight:600; font-size:1.1rem; margin:0; }
+  .drawer-subtitle{ font-size:0.76rem; color:var(--ink-soft); margin-top:4px; }
+  .drawer-body{ flex:1; overflow-y:auto; padding:8px 20px 20px 20px; }
+  .nb-section-label{ font-family:var(--font-mono); font-size:0.62rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-faint); margin:16px 0 8px 0; }
+  .nb-section-label:first-child{ margin-top:4px; }
+  .nb-entry{ font-size:0.85rem; line-height:1.6; padding:10px 0; border-bottom:1px solid var(--border); animation:msgIn 0.3s var(--ease) both; }
+  .nb-entry:last-child{ border-bottom:none; }
+  .nb-sources{ font-family:var(--font-mono); font-size:0.64rem; color:var(--ink-faint); margin-top:5px; }
+  .drawer-footer{ padding:14px 20px; border-top:1px solid var(--border); }
+  .export-btn{
+    width:100%; font-family:var(--font-body); font-size:0.85rem; font-weight:500;
+    background:var(--accent); color:#fff; border:none; border-radius:20px; padding:10px;
+    cursor:pointer; transition:transform 0.15s var(--spring);
+  }
+  .export-btn:hover{ transform:translateY(-1px); }
+
+  .modal-overlay{
+    position:fixed; inset:0; z-index:20; background:rgba(36,31,22,0.25);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity 0.3s var(--ease);
+  }
+  .modal-overlay.open{ opacity:1; pointer-events:auto; }
+  .modal{
+    width:min(640px, 90vw); max-height:78vh; overflow-y:auto;
+    background:#fff; border-radius:20px; padding:30px 34px;
+    box-shadow:0 24px 64px rgba(36,31,22,0.22);
+    transform:scale(0.94) translateY(8px); transition:transform 0.3s var(--spring);
+  }
+  .modal-overlay.open .modal{ transform:scale(1) translateY(0); }
+  .modal h1{ font-family:var(--font-display); font-size:1.4rem; margin:0 0 0.2em 0; }
+  .modal h2{ font-family:var(--font-display); font-size:1rem; margin:1.2em 0 0.5em 0; color:var(--accent); }
+  .modal ul{ padding-left:1.3em; }
+  .modal li{ margin-bottom:0.5em; line-height:1.5; font-size:0.9rem; }
+  .modal em{ color:var(--ink-soft); font-size:0.85em; }
+  .modal-actions{ display:flex; gap:8px; margin-top:22px; }
+  .modal-actions button{
+    font-family:var(--font-body); font-size:0.82rem; font-weight:500; padding:9px 16px;
+    border-radius:20px; cursor:pointer; border:none; transition:transform 0.15s var(--spring);
+  }
+  .modal-actions button:hover{ transform:translateY(-1px); }
+  .btn-primary{ background:var(--accent); color:#fff; }
+  .btn-secondary{ background:var(--rail); color:var(--ink); }
+
+  .confirm-pop{
+    position:absolute; z-index:15; background:#fff; border:1px solid var(--border);
+    border-radius:12px; padding:10px; box-shadow:0 8px 24px rgba(36,31,22,0.15);
+    font-size:0.78rem; width:190px; animation:chipIn 0.15s var(--spring) both;
+  }
+  .confirm-pop p{ margin:0 0 8px 0; color:var(--ink); }
+  .confirm-pop-actions{ display:flex; gap:6px; }
+  .confirm-pop button{
+    flex:1; font-size:0.74rem; padding:6px; border-radius:8px; border:none; cursor:pointer;
+  }
+  .confirm-pop .btn-danger{ background:var(--accent); color:#fff; }
+  .confirm-pop .btn-cancel{ background:var(--rail); color:var(--ink); }
+</style>
+</head>
+<body>
+
+<div class="library-bg"><svg id="shelf-band" width="100%" height="100%" preserveAspectRatio="none"></svg></div>
+
+<div class="app">
+  <div class="rail" id="rail">
+    <div class="rail-top">
+      <button class="rail-toggle" id="rail-toggle"><svg viewBox="0 0 20 20" fill="none"><path d="M3 5.5h14M3 10h14M3 14.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <div class="rail-brand"><span class="book-icon sm"><svg viewBox="0 0 24 22" fill="none"><path d="M2 4c2.2-1.3 5.3-1.3 7.5 0v14c-2.2-1.3-5.3-1.3-7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4c-2.2-1.3-5.3-1.3-7.5 0v14c2.2-1.3 5.3-1.3 7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4.5" x2="12" y2="18.5" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg></span> AI Librarian</div>
+    </div>
+
+    <div class="rail-new-chat" id="new-chat-btn">
+      <span class="plus-icon"><svg viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="label">New chat</span>
+    </div>
+
+    <div class="rail-scroll">
+      <div class="rail-section-label">Chats</div>
+      <div class="rail-list" id="sessions-list"></div>
+
+      <div class="rail-section-label">The Stacks</div>
+      <div class="rail-list" id="rail-list"></div>
+      <div class="rail-add" id="upload-toggle" title="Add a paper"><span class="plus-icon"><svg viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="add-label">Add paper</span></div>
+      <div class="upload-panel" id="upload-panel">
+        <div>
+          <div class="upload-inner">
+            <input type="file" id="up-file" accept="application/pdf" />
+            <span class="meta-hint" id="meta-hint" style="display:none;"></span>
+            <input type="text" id="up-title" placeholder="Title" />
+            <input type="text" id="up-authors" placeholder="Authors" />
+            <input type="text" id="up-year" placeholder="Year" />
+            <button id="up-submit">Upload</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title" id="session-title">New chat</span>
+      <button class="icon-btn" id="notebook-toggle" title="Notes: per-paper digest + saved answers">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 7h5M7.5 10h5M7.5 13h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><span class="badge" id="notebook-badge"></span>
+      </button>
+    </div>
+
+    <div class="thread" id="thread">
+      <div class="thread-inner" id="log">
+        <div class="empty-state">
+          <div class="book-icon lg idle"><svg viewBox="0 0 24 22" fill="none"><path d="M2 4c2.2-1.3 5.3-1.3 7.5 0v14c-2.2-1.3-5.3-1.3-7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4c-2.2-1.3-5.3-1.3-7.5 0v14c2.2-1.3 5.3-1.3 7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4.5" x2="12" y2="18.5" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div class="big">Ask across your library</div>
+          <div class="small">Answers are attributed to each source paper, with page numbers</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer-wrap">
+      <div style="width:100%; max-width:760px;">
+        <form class="composer" id="chat-form">
+          <textarea id="chat-input" placeholder="Ask a question across your active papers..." rows="1"></textarea>
+          <button type="submit" id="send-btn"><svg viewBox="0 0 20 20" fill="none"><path d="M10 15.5V4.5M4.5 10L10 4.5 15.5 10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </form>
+        <div class="composer-hint">Enter to send · Shift+Enter for a new line</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer-overlay" id="drawer-overlay"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div class="drawer-header-row">
+      <h2>Notes</h2>
+      <button class="icon-btn" id="drawer-close"><svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="drawer-subtitle">Digest: a 3-point summary generated once per paper at upload. Saved: answers you've manually kept by hitting "Save". Flagged: answers you thumbs-downed. Neither is your chat history — that's in the left rail.</div>
+  </div>
+  <div class="drawer-body" id="notebook-list"></div>
+  <div class="drawer-footer"><button class="export-btn" id="export-btn">Export notes</button></div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const API_BASE = window.LIBRARIAN_API_BASE || 'http://localhost:8000';
+marked.setOptions({ breaks: true });
+
+let papers = [];
+let activePaperIds = null;
+let sessions = [];
+let currentSessionId = null;
+let history = [];
+
+const rail = document.getElementById('rail');
+const railToggle = document.getElementById('rail-toggle');
+const railList = document.getElementById('rail-list');
+const sessionsList = document.getElementById('sessions-list');
+const sessionTitleEl = document.getElementById('session-title');
+railToggle.addEventListener('click', () => rail.classList.toggle('expanded'));
+
+async function loadSessions(){
+  const res = await fetch(`${API_BASE}/api/sessions`);
+  sessions = await res.json();
+  // Start on a blank DRAFT — no backend session_id yet, so a chat you
+  // open and never use never shows up in history. The real session only
+  // gets created the moment you actually send a message (see sendMessage).
+  startDraftChat();
+}
+
+function startDraftChat(){
+  currentSessionId = null;
+  history = [];
+  sessionTitleEl.textContent = 'New chat';
+  log.innerHTML = `<div class="empty-state">
+    <div class="book-icon lg idle"><svg viewBox="0 0 24 22" fill="none"><path d="M2 4c2.2-1.3 5.3-1.3 7.5 0v14c-2.2-1.3-5.3-1.3-7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4c-2.2-1.3-5.3-1.3-7.5 0v14c2.2-1.3 5.3-1.3 7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4.5" x2="12" y2="18.5" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+    <div class="big">Ask across your library</div>
+    <div class="small">Answers are attributed to each source paper, with page numbers</div>
+  </div>`;
+  renderSessions();
+}
+
+async function switchSession(sessionId){
+  currentSessionId = sessionId;
+  history = [];
+  const session = sessions.find(s => s.id === sessionId);
+  sessionTitleEl.textContent = session ? session.title : 'New chat';
+  renderSessions();
+
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
+  const messages = await res.json();
+  log.innerHTML = '';
+  if(messages.length === 0){
+    log.innerHTML = `<div class="empty-state">
+      <div class="book-icon lg idle"><svg viewBox="0 0 24 22" fill="none"><path d="M2 4c2.2-1.3 5.3-1.3 7.5 0v14c-2.2-1.3-5.3-1.3-7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4c-2.2-1.3-5.3-1.3-7.5 0v14c2.2-1.3 5.3-1.3 7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4.5" x2="12" y2="18.5" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="big">Ask across your library</div>
+      <div class="small">Answers are attributed to each source paper, with page numbers</div>
+    </div>`;
+  } else {
+    let lastUserQuestion = '';
+    messages.forEach(m => {
+      if(m.role === 'user'){
+        addUserMsg(m.content);
+        history.push({role:'user', content:m.content});
+        lastUserQuestion = m.content;
+      } else {
+        const entry = addAssistantMsg();
+        entry.querySelector('[data-status]').remove();
+        entry.querySelector('[data-avatar]').classList.remove('thinking');
+        const bubble = entry.querySelector('[data-bubble]');
+        bubble.style.display = 'block';
+        bubble.innerHTML = marked.parse(m.content);
+        renderCites(entry, m.sources || []);
+        entry.querySelector('[data-actions]').style.display = 'flex';
+        entry._question = lastUserQuestion;
+        entry._variants = [{ answer: m.content, sources: m.sources || [], messageId: m.id, rating: m.feedback_rating || null }];
+        entry._activeIndex = 0;
+        wireMsgActions(entry, lastUserQuestion, m.content, m.sources || [], m.id);
+        history.push({role:'assistant', content:m.content});
+      }
+    });
+  }
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function renderSessions(){
+  sessionsList.innerHTML = '';
+  sessions.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'rail-item' + (s.id === currentSessionId ? ' active' : '');
+    item.title = s.title;
+    item.innerHTML = `<span class="rail-item-label" data-label>${escapeHtml(s.title)}</span><button class="rail-item-delete" title="Delete chat"><svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
+    item.addEventListener('click', (e) => { if(!e.target.closest('.rail-item-delete') && !e.target.closest('[data-label]')) switchSession(s.id); });
+    const label = item.querySelector('[data-label]');
+    label.addEventListener('click', (e) => { if(s.id === currentSessionId) return; switchSession(s.id); });
+    label.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.className = 'rail-item-label-input';
+      input.value = s.title;
+      label.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = async () => {
+        const newTitle = input.value.trim() || s.title;
+        if(newTitle !== s.title){
+          await fetch(`${API_BASE}/api/sessions/${s.id}`, {
+            method:'PATCH', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ title:newTitle })
+          });
+          s.title = newTitle;
+          if(s.id === currentSessionId) sessionTitleEl.textContent = newTitle;
+        }
+        renderSessions();
+      };
+      input.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+        if(e.key === 'Escape'){ input.value = s.title; input.blur(); }
+      });
+      input.addEventListener('blur', commit);
+    });
+    item.querySelector('.rail-item-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      showConfirm(e.currentTarget, `Delete "${s.title.slice(0,24)}"?`, async () => {
+        await fetch(`${API_BASE}/api/sessions/${s.id}`, { method:'DELETE' });
+        sessions = sessions.filter(x => x.id !== s.id);
+        if(currentSessionId === s.id){
+          if(sessions.length > 0) await switchSession(sessions[0].id);
+          else startDraftChat();
+        }
+        renderSessions();
+      });
+    });
+    sessionsList.appendChild(item);
+  });
+}
+
+document.getElementById('new-chat-btn').addEventListener('click', startDraftChat);
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+let openConfirm = null;
+function showConfirm(anchorEl, message, onConfirm){
+  if(openConfirm) openConfirm.remove();
+  const pop = document.createElement('div');
+  pop.className = 'confirm-pop';
+  pop.innerHTML = `<p>${message}</p><div class="confirm-pop-actions"><button class="btn-cancel">Cancel</button><button class="btn-danger">Delete</button></div>`;
+  document.body.appendChild(pop);
+  const rect = anchorEl.getBoundingClientRect();
+  pop.style.top = `${rect.bottom + 6}px`;
+  pop.style.left = `${Math.min(rect.left, window.innerWidth - 210)}px`;
+  openConfirm = pop;
+  pop.querySelector('.btn-cancel').addEventListener('click', () => { pop.remove(); openConfirm = null; });
+  pop.querySelector('.btn-danger').addEventListener('click', () => { pop.remove(); openConfirm = null; onConfirm(); });
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e){
+      if(!pop.contains(e.target)){ pop.remove(); openConfirm = null; document.removeEventListener('click', handler); }
+    });
+  }, 0);
+}
+
+async function loadPapers(){
+  const res = await fetch(`${API_BASE}/api/papers`);
+  papers = await res.json();
+  renderRail();
+}
+
+function renderRail(){
+  railList.innerHTML = '';
+  papers.forEach((p) => {
+    const isActive = activePaperIds === null || activePaperIds.includes(p.id);
+    const item = document.createElement('div');
+    item.className = 'rail-item' + (isActive ? '' : ' inactive');
+    item.title = p.title;
+    item.innerHTML = `<div class="paper-spine" style="background:${p.color}"></div><div class="rail-item-label">${escapeHtml(p.title)}</div><button class="rail-item-edit" title="Edit title/authors/year"><svg viewBox="0 0 20 20" fill="none"><path d="M13.5 3.5l3 3L6 17l-4 1 1-4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg></button><button class="rail-item-delete" title="Delete paper"><svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`;
+    item.addEventListener('click', (e) => { if(!e.target.closest('.rail-item-delete') && !e.target.closest('.rail-item-edit')) toggleActive(p.id); });
+    item.querySelector('.rail-item-edit').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      openEditPaperModal(p);
+    });
+    item.querySelector('.rail-item-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      showConfirm(e.currentTarget, `Delete "${p.title.slice(0,24)}"? This removes it and its indexed text permanently.`, async () => {
+        await fetch(`${API_BASE}/api/papers/${p.id}`, { method:'DELETE' });
+        await loadPapers();
+      });
+    });
+    railList.appendChild(item);
+  });
+}
+
+function toggleActive(paperId){
+  if(activePaperIds === null){
+    activePaperIds = papers.map(p => p.id).filter(id => id !== paperId);
+  } else if(activePaperIds.includes(paperId)){
+    activePaperIds = activePaperIds.filter(id => id !== paperId);
+  } else {
+    activePaperIds.push(paperId);
+    if(activePaperIds.length === papers.length) activePaperIds = null;
+  }
+  renderRail();
+}
+
+const uploadToggle = document.getElementById('upload-toggle');
+const uploadPanel = document.getElementById('upload-panel');
+const fileInput = document.getElementById('up-file');
+const titleInput = document.getElementById('up-title');
+const authorsInput = document.getElementById('up-authors');
+const yearInput = document.getElementById('up-year');
+const metaHint = document.getElementById('meta-hint');
+const submitBtn = document.getElementById('up-submit');
+
+uploadToggle.addEventListener('click', () => {
+  rail.classList.add('expanded');
+  uploadPanel.classList.toggle('open');
+});
+
+fileInput.addEventListener('change', async () => {
+  if(!fileInput.files[0]) return;
+  metaHint.style.display = 'block';
+  metaHint.textContent = 'Reading title, authors, year...';
+  [titleInput, authorsInput, yearInput].forEach(el => el.classList.add('shimmer'));
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  try{
+    const res = await fetch(`${API_BASE}/api/extract-metadata`, { method:'POST', body:formData });
+    const meta = await res.json();
+    titleInput.value = meta.title || '';
+    authorsInput.value = meta.authors || '';
+    yearInput.value = meta.year || '';
+    metaHint.textContent = 'Auto-filled — feel free to edit';
+  } catch(err){
+    metaHint.textContent = 'Could not auto-read metadata — enter manually';
+  } finally {
+    [titleInput, authorsInput, yearInput].forEach(el => el.classList.remove('shimmer'));
+    setTimeout(() => { metaHint.style.display = 'none'; }, 2500);
+  }
+});
+
+submitBtn.addEventListener('click', async () => {
+  const title = titleInput.value.trim();
+  if(!fileInput.files[0] || !title) return;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Uploading...';
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('title', title);
+  formData.append('authors', authorsInput.value.trim());
+  formData.append('year', yearInput.value.trim());
+  try{
+    const res = await fetch(`${API_BASE}/api/papers`, { method:'POST', body:formData });
+    if(!res.ok) throw new Error(`Server responded ${res.status}`);
+    fileInput.value=''; titleInput.value=''; authorsInput.value=''; yearInput.value='';
+    uploadPanel.classList.remove('open');
+    await loadPapers();
+  } catch(err){
+    alert(`Upload failed: ${err.message}`);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Upload';
+  }
+});
+
+const log = document.getElementById('log');
+const thread = document.getElementById('thread');
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+
+function clearEmptyState(){ const e = log.querySelector('.empty-state'); if(e) e.remove(); }
+
+function autoResize(){
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 200) + 'px';
+}
+chatInput.addEventListener('input', autoResize);
+chatInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
+function addUserMsg(text){
+  clearEmptyState();
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  div.innerHTML = `<div class="bubble"></div>`;
+  div.querySelector('.bubble').textContent = text;
+  log.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function addAssistantMsg(){
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.innerHTML = `
+    <div class="book-icon sm thinking" data-avatar><svg viewBox="0 0 24 22" fill="none"><path d="M2 4c2.2-1.3 5.3-1.3 7.5 0v14c-2.2-1.3-5.3-1.3-7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4c-2.2-1.3-5.3-1.3-7.5 0v14c2.2-1.3 5.3-1.3 7.5 0V4z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4.5" x2="12" y2="18.5" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+    <div class="msg-col">
+      <div class="status-row" data-status><span data-status-text>Thinking...</span></div>
+      <div class="bubble" data-bubble style="display:none;"></div>
+      <div class="cite-row" data-cites></div>
+      <div class="variant-nav" data-variant-nav style="display:none;" title="Regenerated responses — flip between attempts">
+        <button data-variant-prev title="Previous response">‹</button>
+        <span data-variant-label>Response 1/1</span>
+        <button data-variant-next title="Next response">›</button>
+      </div>
+      <div class="msg-actions" data-actions style="display:none;">
+        <button data-copy title="Copy"><svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" width="9" height="9" rx="1.3" stroke="currentColor" stroke-width="1.4"/><path d="M13 7V5.5A1.5 1.5 0 0011.5 4h-7A1.5 1.5 0 003 5.5v7A1.5 1.5 0 004.5 14H6" stroke="currentColor" stroke-width="1.4"/></svg><span>Copy</span></button>
+        <button data-retry title="Regenerate"><svg viewBox="0 0 20 20" fill="none"><path d="M15.5 8a5.5 5.5 0 10-1.15 5.65M15.5 8V4M15.5 8h-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Retry</span></button>
+        <button data-up title="Good response"><svg viewBox="0 0 20 20" fill="none"><path d="M7 9v8H4.5a1 1 0 01-1-1v-6a1 1 0 011-1H7zm0 0l3-6a2 2 0 012 2v3h3.3a1.5 1.5 0 011.45 1.87l-1.2 5A1.5 1.5 0 0114.1 17H7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+        <button data-down title="Bad response"><svg viewBox="0 0 20 20" fill="none"><path d="M13 11V3h2.5a1 1 0 011 1v6a1 1 0 01-1 1H13zm0 0l-3 6a2 2 0 01-2-2v-3H4.7a1.5 1.5 0 01-1.45-1.87l1.2-5A1.5 1.5 0 015.9 3H13" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+        <button data-save title="Save to notes">Save</button>
+        <button data-pdf title="Download as PDF"><svg viewBox="0 0 20 20" fill="none"><path d="M10 3v9m0 0l-3.3-3.3M10 12l3.3-3.3M4 14.5v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>PDF</span></button>
+      </div>
+    </div>
+  `;
+  log.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+  return div;
+}
+
+function numberedSources(sources){
+  const seen = new Map();
+  (sources || []).forEach(s => { if(!seen.has(s.paper_id)) seen.set(s.paper_id, s); });
+  return Array.from(seen.values()).map((s, i) => ({...s, n: i + 1}));
+}
+
+function renderCites(container, sources){
+  const row = container.querySelector('[data-cites]');
+  row.innerHTML = '';
+  const numbered = numberedSources(sources);
+  numbered.forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'cite-chip';
+    chip.style.animationDelay = `${(s.n-1) * 0.05}s`;
+    const pageLabel = (s.page !== null && s.page !== undefined) ? `p.${Math.round(s.page) + 1}` : '';
+    const title = s.title.length > 46 ? s.title.slice(0,46)+'…' : s.title;
+    chip.innerHTML = `<span class="cite-num">${s.n}</span><span class="cite-title">${escapeHtml(title)}</span>${pageLabel ? `<span class="cite-page">${pageLabel}</span>` : ''}`;
+    row.appendChild(chip);
+  });
+}
+
+function updateVariantNav(entry){
+  const nav = entry.querySelector('[data-variant-nav]');
+  const variants = entry._variants || [];
+  if(variants.length <= 1){ nav.style.display = 'none'; return; }
+  nav.style.display = 'flex';
+  const label = nav.querySelector('[data-variant-label]');
+  label.textContent = `Response ${entry._activeIndex + 1}/${variants.length}`;
+  nav.querySelector('[data-variant-prev]').disabled = entry._activeIndex === 0;
+  nav.querySelector('[data-variant-next]').disabled = entry._activeIndex === variants.length - 1;
+}
+
+function applyRatingUI(entry){
+  const variant = entry._variants[entry._activeIndex];
+  const upBtn = entry.querySelector('[data-up]');
+  const downBtn = entry.querySelector('[data-down]');
+  upBtn.style.opacity = variant.rating === 'up' ? '1' : '0.45';
+  downBtn.style.opacity = variant.rating === 'down' ? '1' : '0.45';
+}
+
+function showVariant(entry, index){
+  const variants = entry._variants;
+  entry._activeIndex = index;
+  const v = variants[index];
+  entry.querySelector('[data-bubble]').innerHTML = marked.parse(v.answer);
+  renderCites(entry, v.sources);
+  updateVariantNav(entry);
+  applyRatingUI(entry);
+}
+
+function wireMsgActions(entry, question, fullAnswer, sources, messageId){
+  const actions = entry.querySelector('[data-actions]');
+  const nav = entry.querySelector('[data-variant-nav]');
+  updateVariantNav(entry);
+
+  nav.querySelector('[data-variant-prev]').addEventListener('click', () => {
+    if(entry._activeIndex > 0) showVariant(entry, entry._activeIndex - 1);
+  });
+  nav.querySelector('[data-variant-next]').addEventListener('click', () => {
+    if(entry._activeIndex < entry._variants.length - 1) showVariant(entry, entry._activeIndex + 1);
+  });
+
+  actions.querySelector('[data-copy]').addEventListener('click', () => {
+    const current = entry._variants[entry._activeIndex];
+    navigator.clipboard.writeText(current.answer);
+    const btn = actions.querySelector('[data-copy] span');
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+
+  actions.querySelector('[data-retry]').addEventListener('click', async () => {
+    // True in-place regenerate, only valid for the LAST turn in the thread
+    // (its position in the global `history` array is unambiguous). Older
+    // messages fall back to re-asking as a fresh turn at the bottom, since
+    // slicing history correctly for an arbitrary earlier turn gets messy.
+    const isLastTurn = entry === log.lastElementChild;
+    const q = entry._question;
+    if(!isLastTurn){
+      sendMessage(q);
+      return;
+    }
+    const retryBtn = actions.querySelector('[data-retry]');
+    retryBtn.disabled = true;
+    const historyBeforeThisTurn = history.slice(0, -2);
+    const bubble = entry.querySelector('[data-bubble]');
+    entry.querySelector('[data-avatar]').classList.add('thinking');
+    const tempStatus = document.createElement('div');
+    tempStatus.className = 'status-row';
+    tempStatus.dataset.status = '';
+    tempStatus.innerHTML = '<span data-status-text>Thinking...</span>';
+    bubble.before(tempStatus);
+    bubble.style.display = 'none';
+
+    const result = await streamAnswer(entry, q, historyBeforeThisTurn);
+    entry._variants.push({ answer: result.answer, sources: result.sources, messageId: result.messageId });
+    showVariant(entry, entry._variants.length - 1);
+    history[history.length - 1] = { role:'assistant', content: result.answer };
+    retryBtn.disabled = false;
+  });
+
+  const upBtn = actions.querySelector('[data-up]');
+  const downBtn = actions.querySelector('[data-down]');
+  applyRatingUI(entry);
+  async function rate(rating){
+    const current = entry._variants[entry._activeIndex];
+    if(!current.messageId) return;
+    // Toggle off if clicking the same rating again.
+    current.rating = current.rating === rating ? null : rating;
+    applyRatingUI(entry);
+    await fetch(`${API_BASE}/api/messages/${current.messageId}/feedback`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ rating: current.rating || 'none' })
+    });
+  }
+  upBtn.addEventListener('click', () => rate('up'));
+  downBtn.addEventListener('click', () => rate('down'));
+
+  actions.querySelector('[data-save]').addEventListener('click', async () => {
+    const current = entry._variants[entry._activeIndex];
+    const btn = actions.querySelector('[data-save]');
+    const paperIds = Array.from(new Set((current.sources || []).map(s => s.paper_id).filter(Boolean)));
+    await fetch(`${API_BASE}/api/notebook`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question: entry._question, answer: current.answer, source_paper_ids: paperIds })
+    });
+    const original = btn.textContent;
+    btn.textContent = 'Saved';
+    loadNotebook();
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+
+  actions.querySelector('[data-pdf]').addEventListener('click', () => {
+    const current = entry._variants[entry._activeIndex];
+    downloadAsPdf(sessionTitleEl.textContent, current.answer, current.sources);
+  });
+}
+
+async function downloadAsPdf(title, markdownText, sources){
+  let fullMd = `# ${title}\n\n${markdownText}`;
+  const numbered = numberedSources(sources);
+  if(numbered.length){
+    fullMd += `\n\n## Sources\n`;
+    numbered.forEach(s => {
+      const pageLabel = (s.page !== null && s.page !== undefined) ? ` (p.${Math.round(s.page)+1})` : '';
+      fullMd += `${s.n}. ${s.title}${pageLabel}\n`;
+    });
+  }
+  const res = await fetch(`${API_BASE}/api/export/pdf`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ title: title.slice(0,60), markdown: fullMd })
+  });
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${title.slice(0,40).replace(/[^a-z0-9]/gi,'_')}.pdf`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function sendMessage(question){
+  // Lazy session creation: a draft chat has no backend session_id yet.
+  // The moment an actual message goes out, create the real session so it
+  // starts showing up in history — this is what keeps empty "New chat"
+  // rows out of the rail.
+  if(!currentSessionId){
+    const res = await fetch(`${API_BASE}/api/sessions`, { method:'POST' });
+    const session = await res.json();
+    sessions.unshift(session);
+    currentSessionId = session.id;
+    renderSessions();
+  }
+
+  const wasFirstMessage = history.length === 0;
+  addUserMsg(question);
+  const entry = addAssistantMsg();
+  entry._question = question;
+
+  const result = await streamAnswer(entry, question, history);
+  entry._variants = [{ answer: result.answer, sources: result.sources, messageId: result.messageId }];
+  entry._activeIndex = 0;
+  wireMsgActions(entry, question, result.answer, result.sources, result.messageId);
+
+  history.push({role:'user', content:question});
+  history.push({role:'assistant', content:result.answer});
+
+  if(wasFirstMessage){
+    await switchSessionTitleOnly();
+  }
+}
+
+// Runs the actual streamed request against a given (question, history) pair
+// and updates the given entry's DOM as tokens arrive. Shared by both the
+// normal send path and in-place retry, so regenerating doesn't duplicate
+// this logic.
+async function streamAnswer(entry, question, historyForRequest){
+  const statusText = entry.querySelector('[data-status-text]');
+  const statusRow = entry.querySelector('[data-status]');
+  const bubble = entry.querySelector('[data-bubble]');
+  let fullAnswer = '';
+
+  try{
+    const res = await fetch(`${API_BASE}/api/chat`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question, history: historyForRequest, active_paper_ids: activePaperIds, session_id: currentSessionId })
+    });
+    if(!res.ok || !res.body) throw new Error(`Server responded ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let latestSources = [];
+    let messageId = null;
+
+    while(true){
+      const { value, done } = await reader.read();
+      if(done) break;
+      buffer += decoder.decode(value, { stream:true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for(const raw of events){
+        if(!raw.startsWith('data: ')) continue;
+        const payload = JSON.parse(raw.slice(6));
+        if(payload.type === 'retrieved'){
+          if(payload.count > 0) statusText.textContent = 'Synthesizing across sources...';
+        } else if(payload.type === 'token'){
+          if(bubble.style.display === 'none'){
+            bubble.style.display='block';
+            if(statusRow.parentNode) statusRow.remove();
+            entry.querySelector('[data-avatar]').classList.remove('thinking');
+          }
+          fullAnswer += payload.value;
+          bubble.textContent = fullAnswer;
+          thread.scrollTop = thread.scrollHeight;
+        } else if(payload.type === 'done'){
+          latestSources = payload.sources || [];
+          messageId = payload.message_id;
+          fullAnswer = payload.answer !== undefined ? payload.answer : fullAnswer;
+          bubble.innerHTML = marked.parse(fullAnswer);
+          renderCites(entry, latestSources);
+          loadNotebook();
+          entry.querySelector('[data-actions]').style.display = 'flex';
+        }
+      }
+    }
+    return { answer: fullAnswer, sources: latestSources, messageId };
+  } catch(err){
+    if(statusRow.parentNode) statusRow.remove();
+    bubble.style.display = 'block';
+    bubble.textContent = `Error: ${err.message}. Is the backend running at ${API_BASE}?`;
+    return { answer: fullAnswer, sources: [], messageId: null };
+  }
+}
+
+async function switchSessionTitleOnly(){
+  const res = await fetch(`${API_BASE}/api/sessions`);
+  sessions = await res.json();
+  const session = sessions.find(s => s.id === currentSessionId);
+  if(session) sessionTitleEl.textContent = session.title;
+  renderSessions();
+}
+
+chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = chatInput.value.trim();
+  if(!q) return;
+  chatInput.value = '';
+  autoResize();
+  sendBtn.disabled = true;
+  sendMessage(q).finally(() => { sendBtn.disabled = false; chatInput.focus(); });
+});
+
+const drawer = document.getElementById('drawer');
+const drawerOverlay = document.getElementById('drawer-overlay');
+const notebookToggle = document.getElementById('notebook-toggle');
+const notebookList = document.getElementById('notebook-list');
+
+function openDrawer(){ drawer.classList.add('open'); drawerOverlay.classList.add('open'); }
+function closeDrawer(){ drawer.classList.remove('open'); drawerOverlay.classList.remove('open'); }
+notebookToggle.addEventListener('click', openDrawer);
+document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+drawerOverlay.addEventListener('click', closeDrawer);
+
+async function loadNotebook(){
+  const [notebookRes, flaggedRes] = await Promise.all([
+    fetch(`${API_BASE}/api/notebook`),
+    fetch(`${API_BASE}/api/feedback/flagged`)
+  ]);
+  const entries = await notebookRes.json();
+  const flagged = await flaggedRes.json();
+  const saved = entries.filter(e => e.type === 'saved').reverse(); // newest first
+  notebookToggle.classList.toggle('has-entries', saved.length > 0);
+
+  notebookList.innerHTML = '';
+
+  const digestHeading = document.createElement('div');
+  digestHeading.className = 'nb-section-label';
+  digestHeading.textContent = 'Digest';
+  notebookList.appendChild(digestHeading);
+
+  if(papers.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'nb-entry';
+    empty.textContent = 'No papers yet — upload one to see its digest here.';
+    notebookList.appendChild(empty);
+  } else {
+    papers.forEach((p, i) => {
+      const div = document.createElement('div');
+      div.className = 'nb-entry';
+      div.style.animationDelay = `${i*0.05}s`;
+      if(p.summary){
+        const bullets = p.summary.split('\n').filter(l => l.trim()).map(l => `<li>${escapeHtml(l.replace(/^-\s*/,''))}</li>`).join('');
+        div.innerHTML = `<strong>${escapeHtml(p.title)}</strong><ul style="margin:6px 0 0 0; padding-left:1.1em; font-size:0.82rem;">${bullets}</ul>`;
+      } else {
+        div.innerHTML = `<strong>${escapeHtml(p.title)}</strong><div style="margin-top:4px;"><button data-gen-summary="${p.id}" style="font-size:0.72rem; padding:4px 10px; border-radius:12px; border:1px solid var(--border); background:none; cursor:pointer; color:var(--ink-soft);">Generate digest</button></div>`;
+      }
+      notebookList.appendChild(div);
+    });
+  }
+
+  const savedHeading = document.createElement('div');
+  savedHeading.className = 'nb-section-label';
+  savedHeading.textContent = 'Saved';
+  notebookList.appendChild(savedHeading);
+
+  if(saved.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'nb-entry';
+    empty.textContent = 'Nothing saved yet — hit "Save" under any answer to keep it here.';
+    notebookList.appendChild(empty);
+  } else {
+    const paperMap = Object.fromEntries(papers.map(p => [p.id, p]));
+    saved.forEach((e, i) => {
+      const [qLine, ...rest] = e.text.split('\n');
+      const question = qLine.replace(/^Q:\s*/, '');
+      const answer = rest.join('\n').replace(/^A:\s*/, '');
+      const sourceNames = e.source_paper_ids.map(id => paperMap[id]?.title || id).join(', ');
+      const div = document.createElement('div');
+      div.className = 'nb-entry';
+      div.style.animationDelay = `${i*0.05}s`;
+      div.innerHTML = `<strong>${escapeHtml(question)}</strong><div style="margin-top:4px;">${escapeHtml(answer.length > 240 ? answer.slice(0,240)+'…' : answer)}</div>${sourceNames ? `<div class="nb-sources">${escapeHtml(sourceNames)}</div>` : ''}`;
+      notebookList.appendChild(div);
+    });
+  }
+
+  const flaggedHeading = document.createElement('div');
+  flaggedHeading.className = 'nb-section-label';
+  flaggedHeading.textContent = 'Flagged (👎)';
+  notebookList.appendChild(flaggedHeading);
+
+  if(flagged.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'nb-entry';
+    empty.textContent = 'Nothing flagged — answers you thumbs-down show up here so the feedback goes somewhere you can actually see.';
+    notebookList.appendChild(empty);
+  } else {
+    flagged.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'nb-entry';
+      div.style.animationDelay = `${i*0.05}s`;
+      const preview = f.content.length > 200 ? f.content.slice(0,200)+'…' : f.content;
+      div.innerHTML = `<div style="font-size:0.82rem;">${escapeHtml(preview)}</div><div class="nb-sources">from "${escapeHtml(f.session_title)}"</div>`;
+      notebookList.appendChild(div);
+    });
+  }
+
+  notebookList.querySelectorAll('[data-gen-summary]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.textContent = 'Generating...';
+      btn.disabled = true;
+      const res = await fetch(`${API_BASE}/api/papers/${btn.dataset.genSummary}/summarize`, { method:'POST' });
+      const data = await res.json();
+      if(data.summary){
+        const p = papers.find(x => x.id === btn.dataset.genSummary);
+        if(p) p.summary = data.summary;
+      }
+      loadNotebook();
+    });
+  });
+}
+
+const modalOverlay = document.getElementById('modal-overlay');
+const modalContent = document.getElementById('modal-content');
+
+function openEditPaperModal(p){
+  modalContent.innerHTML = `
+    <h1 style="font-size:1.15rem;">Edit paper details</h1>
+    <div style="font-size:0.82rem; color:var(--ink-soft); margin-bottom:18px;">Fixes the registry entry only — doesn't re-read the PDF.</div>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <label style="font-size:0.75rem; color:var(--ink-soft); font-family:var(--font-mono);">TITLE
+        <input id="edit-title" type="text" value="${escapeHtml(p.title || '')}" style="width:100%; margin-top:5px; font-family:var(--font-body); font-size:0.9rem; padding:9px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--ink);" />
+      </label>
+      <label style="font-size:0.75rem; color:var(--ink-soft); font-family:var(--font-mono);">AUTHORS
+        <input id="edit-authors" type="text" value="${escapeHtml(p.authors || '')}" style="width:100%; margin-top:5px; font-family:var(--font-body); font-size:0.9rem; padding:9px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--ink);" />
+      </label>
+      <label style="font-size:0.75rem; color:var(--ink-soft); font-family:var(--font-mono);">YEAR
+        <input id="edit-year" type="text" value="${escapeHtml(p.year || '')}" style="width:120px; margin-top:5px; font-family:var(--font-body); font-size:0.9rem; padding:9px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--ink);" />
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="edit-save">Save changes</button>
+      <button class="btn-secondary" id="edit-cancel">Cancel</button>
+    </div>
+  `;
+  modalOverlay.classList.add('open');
+  const titleInput = document.getElementById('edit-title');
+  titleInput.focus();
+  titleInput.select();
+  document.getElementById('edit-cancel').addEventListener('click', () => modalOverlay.classList.remove('open'));
+  document.getElementById('edit-save').addEventListener('click', async () => {
+    const saveBtn = document.getElementById('edit-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    await fetch(`${API_BASE}/api/papers/${p.id}`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        title: document.getElementById('edit-title').value.trim(),
+        authors: document.getElementById('edit-authors').value.trim(),
+        year: document.getElementById('edit-year').value.trim(),
+      })
+    });
+    modalOverlay.classList.remove('open');
+    await loadPapers();
+  });
+}
+document.getElementById('export-btn').addEventListener('click', async () => {
+  const res = await fetch(`${API_BASE}/api/notebook/export`);
+  const markdown = await res.text();
+  modalContent.innerHTML = marked.parse(markdown) + `
+    <div class="modal-actions">
+      <button class="btn-primary" id="modal-download-pdf">Download PDF</button>
+      <button class="btn-secondary" id="modal-download">Download .md</button>
+      <button class="btn-secondary" id="modal-close">Close</button>
+    </div>`;
+  modalOverlay.classList.add('open');
+  document.getElementById('modal-close').addEventListener('click', () => modalOverlay.classList.remove('open'));
+  document.getElementById('modal-download-pdf').addEventListener('click', async () => {
+    const res = await fetch(`${API_BASE}/api/export/pdf`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ title:'Research Notes', markdown })
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'research-notes.pdf'; a.click();
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById('modal-download').addEventListener('click', () => {
+    const blob = new Blob([markdown], {type:'text/markdown'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'research-notes.md'; a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+modalOverlay.addEventListener('click', (e) => { if(e.target === modalOverlay) modalOverlay.classList.remove('open'); });
+
+(function renderShelf(){
+  const svg = document.getElementById('shelf-band');
+  const colors = ['#9C7A2E','#2B6E5C','#8A3B2E','#3B5A8A','#6E4A8A','#8A6E2E','#2E6E8A','#8A2E5A'];
+  const plankColor = '#6B5636';
+  const rowHeight = 150; // vertical space per shelf, including the plank
+
+  function draw(){
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    let html = '';
+    const rows = Math.ceil(h / rowHeight) + 1;
+
+    for(let r = 0; r < rows; r++){
+      const shelfY = (r + 1) * rowHeight; // the plank sits at the bottom of each row
+      const bookAreaTop = shelfY - rowHeight + 14;
+      let x = 0;
+      while(x < w){
+        const bWidth = 10 + Math.random() * 14;
+        const bHeight = rowHeight - 30 + Math.random() * 24;
+        const bTop = shelfY - bHeight - 4;
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        // book spine body
+        html += `<rect x="${x}" y="${bTop}" width="${Math.max(bWidth - 1.5, 4)}" height="${bHeight}" rx="1" fill="${color}"/>`;
+        // a lighter cap near the top of the spine, like real book head-bands
+        html += `<rect x="${x}" y="${bTop}" width="${Math.max(bWidth - 1.5, 4)}" height="3" fill="#00000022"/>`;
+        x += bWidth;
+      }
+      // the wooden shelf plank itself, plus a soft shadow just beneath it
+      html += `<rect x="0" y="${shelfY}" width="${w}" height="6" fill="${plankColor}"/>`;
+      html += `<rect x="0" y="${shelfY + 6}" width="${w}" height="10" fill="url(#shelfShadow)"/>`;
+    }
+
+    svg.innerHTML = `
+      <defs>
+        <linearGradient id="shelfShadow" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#000000" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${html}
+    `;
+  }
+  draw();
+  let resizeTimer;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(draw, 200); });
+})();
+
+(async function init(){
+  await loadPapers();
+  await loadSessions();
+  await loadNotebook();
+})();
+</script>
+
+</body>
+</html>
