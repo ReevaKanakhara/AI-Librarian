@@ -1,30 +1,43 @@
 """
-db.py — lightweight SQLite storage for:
+db.py — Postgres storage for:
   - papers: the registry of uploaded documents (title, authors, color tag, etc.)
-  - notebook_entries: auto-logged findings / open questions / disagreements
+  - chat_sessions / chat_messages: real chat history
+  - notebook_entries: user-saved notes
+  - message_feedback: thumbs up/down
+
+This used to be SQLite, writing to a local file. Moved to Postgres because
+Render's free tier has no persistent disk — every time the free instance
+sleeps and wakes back up, it's a fresh container, and a local SQLite file
+would be wiped along with it. A hosted Postgres database (e.g. Neon/Supabase
+free tier) lives independently of the app server, so it survives restarts.
+
+Every function here has the exact same name and signature as before — only
+the internals changed. Nothing outside this file needed to change.
 
 Pinecone still stores the actual embedded chunks. This file only stores the
-metadata needed to render "The Stacks" list and "The Notebook" panel.
+metadata needed to render the UI.
 """
 
-import sqlite3
+import os
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "librarian.db"
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 
 def init_db():
     conn = get_conn()
-    conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS papers (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
@@ -32,19 +45,11 @@ def init_db():
             year TEXT,
             color TEXT NOT NULL,
             filename TEXT,
-            uploaded_at TEXT NOT NULL
+            uploaded_at TEXT NOT NULL,
+            summary TEXT
         )
     """)
-    # Migration: older registries won't have this column yet. A one-time,
-    # deterministic per-paper summary generated at ingest time — shown in
-    # the Notes drawer as the "Digest" so it's never blank for new uploads,
-    # and (unlike the old auto-classifier) it's generated once and cached,
-    # so it can't contradict itself across different chat sessions.
-    try:
-        conn.execute("ALTER TABLE papers ADD COLUMN summary TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS notebook_entries (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
@@ -53,11 +58,7 @@ def init_db():
             created_at TEXT NOT NULL
         )
     """)
-    # Real chat history — separate from notebook_entries (which is an
-    # auto-logged findings/open-questions/disagreements digest, not a
-    # transcript). Each session is one conversation thread, shown in the
-    # left rail like Claude/Gemini's chat history.
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
@@ -65,7 +66,7 @@ def init_db():
             updated_at TEXT NOT NULL
         )
     """)
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_messages (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -76,8 +77,7 @@ def init_db():
             FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
         )
     """)
-    # Thumbs up/down on individual assistant messages.
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS message_feedback (
             message_id TEXT PRIMARY KEY,
             rating TEXT NOT NULL,
@@ -85,26 +85,22 @@ def init_db():
         )
     """)
     conn.commit()
+    cur.close()
     conn.close()
 
 
-# A fixed, deliberately chosen palette (not randomly generated) so colors
-# stay visually consistent and legible against the app's parchment theme.
 PALETTE = [
-    "#9C7A2E",  # ochre
-    "#2B6E5C",  # forest teal
-    "#8A3B2E",  # brick
-    "#3B5A8A",  # slate blue
-    "#6E4A8A",  # plum
-    "#8A6E2E",  # bronze
-    "#2E6E8A",  # steel blue
-    "#8A2E5A",  # wine
+    "#9C7A2E", "#2B6E5C", "#8A3B2E", "#3B5A8A",
+    "#6E4A8A", "#8A6E2E", "#2E6E8A", "#8A2E5A",
 ]
 
 
 def assign_color():
     conn = get_conn()
-    count = conn.execute("SELECT COUNT(*) as c FROM papers").fetchone()["c"]
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as c FROM papers")
+    count = cur.fetchone()["c"]
+    cur.close()
     conn.close()
     return PALETTE[count % len(PALETTE)]
 
@@ -113,51 +109,53 @@ def add_paper(title, authors, year, filename):
     paper_id = str(uuid.uuid4())[:8]
     color = assign_color()
     conn = get_conn()
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         "INSERT INTO papers (id, title, authors, year, color, filename, uploaded_at) "
-        "VALUES (?,?,?,?,?,?,?)",
+        "VALUES (%s,%s,%s,%s,%s,%s,%s)",
         (paper_id, title, authors, year, color, filename,
          datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
+    cur.close()
     conn.close()
     return paper_id, color
 
 
 def list_papers():
     conn = get_conn()
-    rows = conn.execute("SELECT * FROM papers ORDER BY uploaded_at ASC").fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM papers ORDER BY uploaded_at ASC")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def delete_paper(paper_id):
     conn = get_conn()
-    conn.execute("DELETE FROM papers WHERE id=?", (paper_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM papers WHERE id=%s", (paper_id,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def update_paper(paper_id, title=None, authors=None, year=None):
-    """Corrects a paper's registry metadata in place — e.g. fixing a missed
-    author name — without deleting and re-ingesting the whole PDF. Note:
-    this only updates the SQLite registry (which is what LIBRARY INDEX-based
-    questions like 'list all authors' read from). It does NOT rewrite the
-    per-chunk metadata already stored in Pinecone, so passages retrieved for
-    subject-matter questions may still carry the old authors string in their
-    citation metadata until the paper is re-uploaded."""
     conn = get_conn()
+    cur = conn.cursor()
     fields, values = [], []
     if title is not None:
-        fields.append("title=?"); values.append(title)
+        fields.append("title=%s"); values.append(title)
     if authors is not None:
-        fields.append("authors=?"); values.append(authors)
+        fields.append("authors=%s"); values.append(authors)
     if year is not None:
-        fields.append("year=?"); values.append(year)
+        fields.append("year=%s"); values.append(year)
     if fields:
         values.append(paper_id)
-        conn.execute(f"UPDATE papers SET {', '.join(fields)} WHERE id=?", values)
+        cur.execute(f"UPDATE papers SET {', '.join(fields)} WHERE id=%s", values)
         conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -165,88 +163,104 @@ def create_session(title="New chat"):
     session_id = str(uuid.uuid4())[:8]
     now = datetime.now(timezone.utc).isoformat()
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO chat_sessions (id, title, created_at, updated_at) VALUES (?,?,?,?)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO chat_sessions (id, title, created_at, updated_at) VALUES (%s,%s,%s,%s)",
         (session_id, title, now, now),
     )
     conn.commit()
+    cur.close()
     conn.close()
     return session_id
 
 
 def list_sessions():
     conn = get_conn()
-    # Only sessions that actually have at least one message — a session
-    # created but never used (e.g. the current blank "New chat" you're
-    # sitting on) shouldn't clutter the history list.
-    rows = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT s.* FROM chat_sessions s
         WHERE EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.id)
         ORDER BY s.updated_at DESC
-    """).fetchall()
+    """)
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def get_session(session_id):
     conn = get_conn()
-    row = conn.execute("SELECT * FROM chat_sessions WHERE id=?", (session_id,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM chat_sessions WHERE id=%s", (session_id,))
+    row = cur.fetchone()
+    cur.close()
     conn.close()
     return dict(row) if row else None
 
 
 def rename_session(session_id, title):
     conn = get_conn()
-    conn.execute(
-        "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=?",
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE chat_sessions SET title=%s, updated_at=%s WHERE id=%s",
         (title, datetime.now(timezone.utc).isoformat(), session_id),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def touch_session(session_id):
     conn = get_conn()
-    conn.execute(
-        "UPDATE chat_sessions SET updated_at=? WHERE id=?",
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE chat_sessions SET updated_at=%s WHERE id=%s",
         (datetime.now(timezone.utc).isoformat(), session_id),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def delete_session(session_id):
     conn = get_conn()
-    conn.execute("DELETE FROM chat_messages WHERE session_id=?", (session_id,))
-    conn.execute("DELETE FROM chat_sessions WHERE id=?", (session_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM chat_messages WHERE session_id=%s", (session_id,))
+    cur.execute("DELETE FROM chat_sessions WHERE id=%s", (session_id,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def add_message(session_id, role, content, sources=None):
     msg_id = str(uuid.uuid4())[:8]
     conn = get_conn()
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         "INSERT INTO chat_messages (id, session_id, role, content, sources, created_at) "
-        "VALUES (?,?,?,?,?,?)",
+        "VALUES (%s,%s,%s,%s,%s,%s)",
         (msg_id, session_id, role, content,
          json.dumps(sources) if sources is not None else None,
          datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
+    cur.close()
     conn.close()
     return msg_id
 
 
 def list_messages(session_id):
     conn = get_conn()
-    rows = conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """SELECT m.*, f.rating AS feedback_rating
            FROM chat_messages m
            LEFT JOIN message_feedback f ON f.message_id = m.id
-           WHERE m.session_id=? ORDER BY m.created_at ASC""",
+           WHERE m.session_id=%s ORDER BY m.created_at ASC""",
         (session_id,),
-    ).fetchall()
+    )
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     out = []
     for r in rows:
@@ -259,20 +273,25 @@ def list_messages(session_id):
 def add_notebook_entry(entry_type, text, source_paper_ids):
     entry_id = str(uuid.uuid4())[:8]
     conn = get_conn()
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         "INSERT INTO notebook_entries (id, type, text, source_paper_ids, created_at) "
-        "VALUES (?,?,?,?,?)",
+        "VALUES (%s,%s,%s,%s,%s)",
         (entry_id, entry_type, text, json.dumps(source_paper_ids),
          datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
+    cur.close()
     conn.close()
     return entry_id
 
 
 def list_notebook_entries():
     conn = get_conn()
-    rows = conn.execute("SELECT * FROM notebook_entries ORDER BY created_at ASC").fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM notebook_entries ORDER BY created_at ASC")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     out = []
     for r in rows:
@@ -284,38 +303,47 @@ def list_notebook_entries():
 
 def set_paper_summary(paper_id, summary):
     conn = get_conn()
-    conn.execute("UPDATE papers SET summary=? WHERE id=?", (summary, paper_id))
+    cur = conn.cursor()
+    cur.execute("UPDATE papers SET summary=%s WHERE id=%s", (summary, paper_id))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def list_down_voted():
     conn = get_conn()
-    rows = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT m.content, m.created_at, s.title AS session_title, s.id AS session_id
         FROM message_feedback f
         JOIN chat_messages m ON m.id = f.message_id
         JOIN chat_sessions s ON s.id = m.session_id
         WHERE f.rating = 'down'
         ORDER BY f.created_at DESC
-    """).fetchall()
+    """)
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def set_message_feedback(message_id, rating):
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO message_feedback (message_id, rating, created_at) VALUES (?,?,?) "
-        "ON CONFLICT(message_id) DO UPDATE SET rating=excluded.rating, created_at=excluded.created_at",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO message_feedback (message_id, rating, created_at) VALUES (%s,%s,%s) "
+        "ON CONFLICT (message_id) DO UPDATE SET rating=excluded.rating, created_at=excluded.created_at",
         (message_id, rating, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def clear_message_feedback(message_id):
     conn = get_conn()
-    conn.execute("DELETE FROM message_feedback WHERE message_id=?", (message_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM message_feedback WHERE message_id=%s", (message_id,))
     conn.commit()
+    cur.close()
     conn.close()
