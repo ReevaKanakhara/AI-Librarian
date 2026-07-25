@@ -42,7 +42,7 @@ db.init_db()
 app = FastAPI(title="AI Librarian API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://startling-fox-de6104.netlify.app"],
+    allow_origins=["https://librarian-app-2026.netlify.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
