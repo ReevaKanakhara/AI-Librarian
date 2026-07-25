@@ -174,6 +174,25 @@ def create_session(title="New chat"):
     return session_id
 
 
+def ensure_session(session_id, title="New chat"):
+    """Creates a session with this EXACT id if it doesn't already exist.
+    Used to heal a client-provided session_id that the frontend still holds
+    but which the database has no record of (e.g. a browser tab open across
+    a database migration) — avoids a foreign key violation on the first
+    message sent through it, instead of hard-failing with a 500."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO chat_sessions (id, title, created_at, updated_at) VALUES (%s,%s,%s,%s) "
+        "ON CONFLICT (id) DO NOTHING",
+        (session_id, title, now, now),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def list_sessions():
     conn = get_conn()
     cur = conn.cursor()

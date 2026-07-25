@@ -42,7 +42,7 @@ db.init_db()
 app = FastAPI(title="AI Librarian API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://librarian-app-2026.netlify.app"],
+    allow_origins=["*"],   # tighten before deploying publicly
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -273,7 +273,14 @@ async def chat(req: ChatRequest):
     # Auto-title a fresh session from its first question, same pattern as
     # Claude/Gemini — only rename if it's still using the default title.
     session = db.get_session(req.session_id)
-    if session and session["title"] == "New chat":
+    if session is None:
+        # The frontend sent a session_id that doesn't exist server-side —
+        # e.g. a browser tab left open across a database migration/redeploy,
+        # still holding a session id from a backing store that no longer
+        # has it. Rather than 500ing on the foreign key violation this
+        # causes, just create it: self-healing instead of crashing.
+        db.ensure_session(req.session_id)
+    elif session["title"] == "New chat":
         title = req.question.strip()[:60]
         if len(req.question.strip()) > 60:
             title += "…"
