@@ -305,6 +305,15 @@ def add_notebook_entry(entry_type, text, source_paper_ids):
     return entry_id
 
 
+def delete_notebook_entry(entry_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM notebook_entries WHERE id=%s", (entry_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def list_notebook_entries():
     conn = get_conn()
     cur = conn.cursor()

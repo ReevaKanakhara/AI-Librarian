@@ -36,13 +36,48 @@ import rag
 import notebook
 import pdf_export
 
+import hashlib
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 load_dotenv()
 db.init_db()
 
 app = FastAPI(title="AI Librarian API")
+
+ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "")
+if not ACCESS_PASSWORD:
+    raise RuntimeError("ACCESS_PASSWORD not found in .env")
+
+
+def _expected_token() -> str:
+    # Deterministic from the password + a fixed namespace string — no
+    # server-side session storage needed, so it survives restarts/redeploys
+    # without a sessions table. Simple on purpose: one shared password for
+    # the whole app, not per-user accounts.
+    return hashlib.sha256(f"ai-librarian-session:{ACCESS_PASSWORD}".encode()).hexdigest()
+
+
+@app.middleware("http")
+async def require_password(request: Request, call_next):
+    # Preflight requests and the login/health checks themselves must always
+    # be reachable, or the browser can never even ask for a token.
+    if request.method == "OPTIONS" or request.url.path in ("/api/health", "/api/login"):
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ") if auth_header.startswith("Bearer ") else ""
+    if token != _expected_token():
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized — please log in."})
+
+    return await call_next(request)
+
+
+# Added AFTER require_password so CORS wraps it and still attaches headers
+# to a 401 response, not just successful ones.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten before deploying publicly
+    allow_origins=["https://librarian-app-2026.netlify.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -75,6 +110,17 @@ class ChatRequest(BaseModel):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/login")
+async def login(req: LoginRequest):
+    if req.password != ACCESS_PASSWORD:
+        return JSONResponse(status_code=401, content={"detail": "Incorrect password"})
+    return {"token": _expected_token()}
 
 
 @app.post("/api/extract-metadata")
@@ -215,6 +261,12 @@ async def save_note(req: NoteRequest):
     summary = f"Q: {req.question}\nA: {req.answer}"
     entry_id = db.add_notebook_entry("saved", summary, req.source_paper_ids)
     return {"id": entry_id}
+
+
+@app.delete("/api/notebook/{entry_id}")
+async def remove_note(entry_id: str):
+    db.delete_notebook_entry(entry_id)
+    return {"deleted": entry_id}
 
 
 class PdfExportRequest(BaseModel):

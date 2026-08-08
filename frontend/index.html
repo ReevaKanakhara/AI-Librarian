@@ -475,7 +475,66 @@
 </div>
 
 <script>
-const API_BASE = window.LIBRARIAN_API_BASE || 'https://ai-librarian-5iu3.onrender.com';
+const API_BASE = window.LIBRARIAN_API_BASE || 'http://localhost:8000';
+
+// ---------- Auth: simple shared-password gate ----------
+const TOKEN_KEY = 'librarian_token';
+let authToken = localStorage.getItem(TOKEN_KEY) || null;
+
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = async function(url, options = {}) {
+  if (typeof url === 'string' && url.startsWith(API_BASE) && authToken) {
+    options = { ...options, headers: { ...(options.headers || {}), 'Authorization': 'Bearer ' + authToken } };
+  }
+  const res = await _nativeFetch(url, options);
+  if (res.status === 401 && typeof url === 'string' && url.startsWith(API_BASE) && !url.endsWith('/api/login')) {
+    authToken = null;
+    localStorage.removeItem(TOKEN_KEY);
+    showLoginGate();
+  }
+  return res;
+};
+
+function showLoginGate(){
+  let gate = document.getElementById('login-gate');
+  if(gate){ gate.style.display = 'flex'; return; }
+  gate = document.createElement('div');
+  gate.id = 'login-gate';
+  gate.style.cssText = 'position:fixed;inset:0;z-index:999;background:#FBF9F5;display:flex;align-items:center;justify-content:center;';
+  gate.innerHTML = `
+    <form id="login-form" style="width:280px; display:flex; flex-direction:column; gap:12px; text-align:center;">
+      <div style="font-family:'Source Serif 4',serif; font-weight:600; font-size:1.3rem; color:#241F16;">AI Librarian</div>
+      <input id="login-password" type="password" placeholder="Password" autofocus
+        style="font-family:'IBM Plex Sans',sans-serif; font-size:0.95rem; padding:10px 14px; border:1px solid #E4DCC9; border-radius:12px; background:#fff; color:#241F16; outline:none;" />
+      <div id="login-error" style="font-size:0.8rem; color:#8A3B2E; display:none;">Incorrect password</div>
+      <button type="submit"
+        style="font-family:'IBM Plex Sans',sans-serif; font-size:0.9rem; font-weight:500; padding:10px; border:none; border-radius:12px; background:#8A3B2E; color:#fff; cursor:pointer;">
+        Enter
+      </button>
+    </form>
+  `;
+  document.body.appendChild(gate);
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    try {
+      const res = await _nativeFetch(`${API_BASE}/api/login`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ password })
+      });
+      if(!res.ok){ errorEl.style.display = 'block'; return; }
+      const data = await res.json();
+      authToken = data.token;
+      localStorage.setItem(TOKEN_KEY, authToken);
+      gate.style.display = 'none';
+      startApp();
+    } catch(err){
+      errorEl.textContent = 'Could not reach the server — try again.';
+      errorEl.style.display = 'block';
+    }
+  });
+}
 marked.setOptions({ breaks: true });
 
 let papers = [];
@@ -1135,8 +1194,14 @@ async function loadNotebook(){
       const div = document.createElement('div');
       div.className = 'nb-entry';
       div.style.animationDelay = `${i*0.05}s`;
-      div.innerHTML = `<strong>${escapeHtml(question)}</strong><div style="margin-top:4px;">${escapeHtml(answer.length > 240 ? answer.slice(0,240)+'…' : answer)}</div>${sourceNames ? `<div class="nb-sources">${escapeHtml(sourceNames)}</div>` : ''}`;
+      div.innerHTML = `<div style="display:flex; justify-content:space-between; gap:8px;"><strong>${escapeHtml(question)}</strong><button data-del-note="${e.id}" style="flex-shrink:0; border:none; background:none; color:var(--ink-faint); cursor:pointer; font-size:0.85rem;" title="Delete">✕</button></div><div style="margin-top:4px;">${escapeHtml(answer.length > 240 ? answer.slice(0,240)+'…' : answer)}</div>${sourceNames ? `<div class="nb-sources">${escapeHtml(sourceNames)}</div>` : ''}`;
       notebookList.appendChild(div);
+    });
+    notebookList.querySelectorAll('[data-del-note]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch(`${API_BASE}/api/notebook/${btn.dataset.delNote}`, { method: 'DELETE' });
+        loadNotebook();
+      });
     });
   }
 
@@ -1300,11 +1365,17 @@ modalOverlay.addEventListener('click', (e) => { if(e.target === modalOverlay) mo
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(draw, 200); });
 })();
 
-(async function init(){
+async function startApp(){
   await loadPapers();
   await loadSessions();
   await loadNotebook();
-})();
+}
+
+if(authToken){
+  startApp();
+} else {
+  showLoginGate();
+}
 </script>
 
 </body>
