@@ -23,22 +23,22 @@ the library by default.
 
 ```
 ┌──────────────────┐     HTTP      ┌───────────────────────────────┐
-│   Static HTML/JS  │ ────────────► │       FastAPI Backend         │
-│   (Netlify)       │               │       (Render)                │
-│                   │               │                               │
-│  Chat UI          │               │  ┌─────────────────────────┐  │
-│  Paper management │               │  │   Retrieval + Synthesis │  │
-│  Notes drawer      │               │  │   (Groq / Llama 3.3)    │  │
-│  PDF export        │               │  └────────────┬────────────┘  │
-└──────────────────┘               │               │                │
-                                    │  ┌────────────▼────────────┐  │
-                                    │  │  Pinecone (hosted        │  │
-                                    │  │  embeddings + vectors)   │  │
-                                    │  └──────────────────────────┘  │
-                                    │                               │
-                                    │  Postgres (Neon)              │
-                                    │  — papers, chats, notes       │
-                                    └───────────────────────────────┘
+│   Static HTML/JS │ ────────────► │       FastAPI Backend         │
+│   (Netlify)      │               │       (Render)                │
+│                  │               │                               │
+│  Chat UI         │               │  ┌─────────────────────────┐  │
+│  Paper management│               │  │   Retrieval + Synthesis │  │
+│  Notes drawer    │               │  │   (Groq / Llama 3.3)    │  │
+│  PDF export      │               │  └────────────┬────────────┘  │
+└──────────────────┘               │               │               │
+                                   │  ┌────────────▼────────────┐  │
+                                   │  │  Pinecone (hosted       │  │
+                                   │  │  embeddings + vectors)  │  │
+                                   │  └─────────────────────────┘  │
+                                   │                               │
+                                   │  Postgres (Neon)              │
+                                   │  — papers, chats, notes       │
+                                   └───────────────────────────────┘
 ```
 
 ## Features
