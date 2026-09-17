@@ -133,7 +133,8 @@ Excerpt:
         model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
-        max_tokens=200,
+        max_tokens=500,
+        reasoning_effort="low",
         response_format={
             "type": "json_schema",
             "json_schema": {
@@ -179,7 +180,8 @@ Paper text:
         model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
-        max_tokens=250,
+        max_tokens=500,
+        reasoning_effort="low",
     )
     return resp.choices[0].message.content.strip()
 
