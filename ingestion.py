@@ -130,7 +130,7 @@ Excerpt:
 {first_page_text}
 """
     resp = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
         max_tokens=200,
@@ -159,7 +159,7 @@ Paper text:
 {text[:6000]}
 """
     resp = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-20b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
         max_tokens=250,

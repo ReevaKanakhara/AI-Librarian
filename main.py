@@ -345,7 +345,7 @@ async def chat(req: ChatRequest):
 
         t0 = time.time()
         stream = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=qa_messages,
             # temperature=0 for real paper questions (accuracy over
             # variety); casual/identity chat gets some warmth so a retry

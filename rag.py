@@ -93,7 +93,7 @@ def contextualize(groq_client, question: str, history: list) -> str:
         + [{"role": "user", "content": f"Follow-up: {question}"}]
     )
     resp = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=ctx_messages,
         temperature=0,
         max_tokens=200,
