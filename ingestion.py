@@ -134,6 +134,23 @@ Excerpt:
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
         max_tokens=200,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "paper_metadata",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "authors": {"type": "string"},
+                        "year": {"type": "string"},
+                    },
+                    "required": ["title", "authors", "year"],
+                    "additionalProperties": False,
+                },
+            },
+        },
     )
     raw = resp.choices[0].message.content.strip()
     try:
